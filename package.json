@@ -1,0 +1,30 @@
+{
+  "name": "opna",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm run dev --workspace @opna/backend\" \"npm run dev --workspace @opna/frontend\"",
+    "build": "npm run build --workspace @opna/backend && npm run build --workspace @opna/frontend",
+    "typecheck": "npm run typecheck --workspace @opna/backend && npm run typecheck --workspace @opna/frontend",
+    "test": "npm run test --workspaces --if-present",
+    "db:start": "supabase start",
+    "db:reset": "supabase db reset",
+    "db:test": "supabase test db"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "supabase": "^2.120.0"
+  },
+  "overrides": {
+    "shell-quote": "^1.12.0"
+  }
+}
