@@ -23,6 +23,34 @@ export type AvailabilityWindow = {
   endLocal: string;
 };
 
+export type BookingStatus = 'confirmed' | 'completed' | 'cancelled';
+
+export type OwnerBooking = {
+  id: string;
+  businessId: string;
+  serviceId: string;
+  serviceName: string;
+  durationMinutes: number;
+  customerName: string;
+  customerEmail?: string;
+  startsAt: string;
+  endsAt: string;
+  status: BookingStatus;
+  timezone: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OwnerDashboard = {
+  counts: { upcoming: number; completed: number; cancelled: number };
+  nextBooking: OwnerBooking | null;
+};
+
+export type OwnerBookingsPage = {
+  bookings: OwnerBooking[];
+  nextCursor: string | null;
+};
+
 export type OwnerFieldErrors = Record<string, string>;
 
 export class OwnerApiError extends Error {
@@ -96,4 +124,23 @@ export function getOwnerAvailability(accessToken: string) {
 
 export function saveOwnerAvailability(accessToken: string, windows: AvailabilityWindow[]) {
   return ownerRequest<{ windows: AvailabilityWindow[] }>(accessToken, '/availability', { method: 'PUT', body: JSON.stringify({ windows }) });
+}
+
+export function getOwnerDashboard(accessToken: string) {
+  return ownerRequest<OwnerDashboard>(accessToken, '/dashboard');
+}
+
+export function getOwnerBookings(accessToken: string, cursor?: string) {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  return ownerRequest<OwnerBookingsPage>(accessToken, `/bookings${query}`);
+}
+
+export function getOwnerBooking(accessToken: string, id: string) {
+  return ownerRequest<OwnerBooking>(accessToken, `/bookings/${encodeURIComponent(id)}`);
+}
+
+export function updateOwnerBookingStatus(accessToken: string, id: string, status: 'completed' | 'cancelled') {
+  return ownerRequest<OwnerBooking>(accessToken, `/bookings/${encodeURIComponent(id)}/status`, {
+    method: 'PATCH', body: JSON.stringify({ status }),
+  });
 }

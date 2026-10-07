@@ -118,4 +118,91 @@ describe.skipIf(!integrationEnabled)('local database booking overlap integration
       if (ownerId) await client.auth.admin.deleteUser(ownerId);
     }
   });
+
+  it('cancelling an owner booking releases its time for another booking', async () => {
+    const config = integrationConfig!;
+    const client = createClient(config.supabaseUrl, config.supabaseSecretKey!, {
+      auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+    });
+    const ownerClient = createClient(config.supabaseUrl, config.supabasePublishableKey, {
+      auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+    });
+    const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+    const email = `phase3-${suffix}@example.test`;
+    const password = `${randomUUID()}aA1!`;
+    let ownerId: string | null = null;
+    let businessId: string | null = null;
+
+    try {
+      const { data: userResult, error: userError } = await client.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+      if (userError || !userResult.user) throw userError ?? new Error('Local test owner was not created.');
+      ownerId = userResult.user.id;
+
+      const { data: sessionResult, error: sessionError } = await ownerClient.auth.signInWithPassword({ email, password });
+      if (sessionError || !sessionResult.session) throw sessionError ?? new Error('Local test owner did not receive a session.');
+
+      const { data: business, error: businessError } = await client.from('businesses').insert({
+        owner_id: ownerId,
+        name: `Phase 3 Integration ${suffix}`,
+        slug: `phase-3-integration-${suffix}`,
+        timezone: 'UTC',
+      }).select('id').single();
+      if (businessError || !business) throw businessError ?? new Error('Local test business was not created.');
+      businessId = business.id;
+
+      const { data: service, error: serviceError } = await client.from('services').insert({
+        business_id: businessId,
+        name: 'Integration appointment',
+        duration_minutes: 30,
+        is_active: true,
+      }).select('id').single();
+      if (serviceError || !service) throw serviceError ?? new Error('Local test service was not created.');
+
+      const startsAt = `${Temporal.Now.plainDateISO('UTC').add({ days: 1 }).toString()}T12:00:00Z`;
+      const endsAt = Temporal.Instant.from(startsAt).add({ minutes: 30 }).toString();
+      const { data: booking, error: bookingError } = await client.from('bookings').insert({
+        business_id: businessId,
+        service_id: service.id,
+        service_name_snapshot: 'Integration appointment',
+        duration_minutes_snapshot: 30,
+        customer_name: 'First Customer',
+        customer_email: 'first.customer@example.test',
+        starts_at: startsAt,
+        ends_at: endsAt,
+        status: 'confirmed',
+      }).select('id').single();
+      if (bookingError || !booking) throw bookingError ?? new Error('Local test booking was not created.');
+
+      const app = createApp({ config });
+      const cancellation = await request(app).patch(`/api/owner/bookings/${booking.id}/status`)
+        .set('Authorization', `Bearer ${sessionResult.session.access_token}`)
+        .send({ status: 'cancelled' }).expect(200);
+      expect(cancellation.body.data.status).toBe('cancelled');
+
+      const { error: replacementError } = await client.from('bookings').insert({
+        business_id: businessId,
+        service_id: service.id,
+        service_name_snapshot: 'Integration appointment',
+        duration_minutes_snapshot: 30,
+        customer_name: 'Replacement Customer',
+        customer_email: 'replacement.customer@example.test',
+        starts_at: startsAt,
+        ends_at: endsAt,
+        status: 'confirmed',
+      });
+      expect(replacementError).toBeNull();
+    } finally {
+      await ownerClient.auth.signOut();
+      if (businessId) {
+        await client.from('bookings').delete().eq('business_id', businessId);
+        await client.from('services').delete().eq('business_id', businessId);
+        await client.from('businesses').delete().eq('id', businessId);
+      }
+      if (ownerId) await client.auth.admin.deleteUser(ownerId);
+    }
+  });
 });

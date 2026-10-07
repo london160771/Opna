@@ -1,6 +1,7 @@
 import type { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OwnerLocals } from './auth/requireOwner.js';
+import { registerOwnerBookingRoutes } from './ownerBookingRoutes.js';
 
 type Fields = Record<string, string>;
 type Business = { id: string; name: string; slug: string; timezone: string; hasBookings: boolean };
@@ -324,4 +325,6 @@ export function registerOwnerRoutes(router: Router) {
     const windows = rows.map((row) => ({ weekday: row.weekday, startLocal: databaseTimeToLocal(row.start_local), endLocal: databaseTimeToLocal(row.end_local) }));
     return res.json({ data: { windows } });
   });
+
+  registerOwnerBookingRoutes(router);
 }

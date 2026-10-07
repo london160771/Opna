@@ -6,7 +6,8 @@ import { Brand } from './Brand';
 import { Loading } from './Loading';
 
 const navigation = [
-  { to: '/app', label: 'Setup', end: true },
+  { to: '/app', label: 'Overview', end: true },
+  { to: '/app/bookings', label: 'Bookings', end: false },
   { to: '/app/services', label: 'Services', end: false },
   { to: '/app/availability', label: 'Availability', end: false },
   { to: '/app/settings', label: 'Settings', end: false },
