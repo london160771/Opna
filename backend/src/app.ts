@@ -5,13 +5,19 @@ import type { AppConfig } from './config.js';
 import { requireOwner } from './auth/requireOwner.js';
 import { createUserSupabaseFactory, type UserSupabaseFactory } from './supabase.js';
 import { registerOwnerRoutes } from './ownerRoutes.js';
+import { registerPublicRoutes } from './publicRoutes.js';
+import { createPublicRateLimit, type PublicRateLimitOptions } from './publicRateLimit.js';
+import { createPublicSupabaseFactory, type PublicSupabaseFactory } from './supabase.js';
 
 type AppDependencies = {
   config: AppConfig;
   createUserClient?: UserSupabaseFactory;
+  createPublicClient?: PublicSupabaseFactory;
+  publicRateLimit?: PublicRateLimitOptions;
+  publicNow?: () => Date;
 };
 
-export function createApp({ config, createUserClient = createUserSupabaseFactory(config) }: AppDependencies) {
+export function createApp({ config, createUserClient = createUserSupabaseFactory(config), createPublicClient = createPublicSupabaseFactory(config), publicRateLimit, publicNow }: AppDependencies) {
   const app = express();
   app.disable('x-powered-by');
   app.use(helmet());
@@ -27,6 +33,11 @@ export function createApp({ config, createUserClient = createUserSupabaseFactory
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ data: { status: 'ok' } });
   });
+
+  const publicRouter = Router();
+  publicRouter.use(createPublicRateLimit(publicRateLimit));
+  registerPublicRoutes(publicRouter, createPublicClient, publicNow);
+  app.use('/api/public', publicRouter);
 
   const ownerRouter = Router();
   ownerRouter.use(requireOwner(createUserClient));

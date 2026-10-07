@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Brand } from '../components/Brand';
+import { BusinessLookup } from '../components/BusinessLookup';
 
 export function HomePage() {
   return (
@@ -8,7 +9,8 @@ export function HomePage() {
         <Brand />
         <Link to="/login" className="inline-flex min-h-11 items-center rounded-lg px-4 font-medium text-slate-700 hover:bg-white hover:text-slate-900">Login</Link>
       </header>
-      <main className="mx-auto grid max-w-6xl gap-10 px-5 pb-16 pt-10 sm:px-8 sm:pt-16 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-16 lg:pb-24">
+      <main className="mx-auto max-w-6xl px-5 pb-16 pt-10 sm:px-8 sm:pt-16 lg:pb-24">
+       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-16">
         <section>
           <p className="text-sm font-semibold text-blue-700">Booking, made simple</p>
           <h1 className="mt-4 max-w-2xl text-4xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-5xl">A simple booking page for your business.</h1>
@@ -48,6 +50,8 @@ export function HomePage() {
           </div>
           <p className="mt-4 text-sm text-slate-500">A clear path for clients to book with you.</p>
         </aside>
+       </div>
+       <BusinessLookup />
       </main>
     </div>
   );

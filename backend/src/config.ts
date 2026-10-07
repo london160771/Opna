@@ -1,6 +1,7 @@
 export type AppConfig = {
   supabaseUrl: string;
   supabasePublishableKey: string;
+  supabaseSecretKey?: string;
   port: number;
   corsOrigins: string[];
 };
@@ -34,6 +35,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
   return {
     supabaseUrl,
     supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY!.trim(),
+    supabaseSecretKey: env.SUPABASE_SECRET_KEY?.trim() || env.SUPABASE_SERVICE_ROLE_KEY?.trim() || undefined,
     port,
     corsOrigins,
   };

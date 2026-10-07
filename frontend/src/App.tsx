@@ -9,6 +9,7 @@ import { SetupPage } from './pages/SetupPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { AvailabilityPage } from './pages/AvailabilityPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { PublicBookingPage } from './pages/PublicBookingPage';
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
       <AuthProvider>
         <Routes>
           <Route path="/" element={<HomePage />} />
+          <Route path="/book/:slug" element={<PublicBookingPage />} />
           <Route path="/register" element={<AuthForm mode="register" />} />
           <Route path="/login" element={<AuthForm mode="login" />} />
           <Route path="/app/setup" element={<OwnerGuard setupPage><SetupPage /></OwnerGuard>} />
