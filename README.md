@@ -2,9 +2,9 @@
 
 Opna is a two-sided booking MVP. Owners authenticate and manage one business; customers will book through a known business link without creating an account.
 
-## Phase 0 status
+## Phase 1 status
 
-This repository currently contains the frontend/backend foundation, Supabase Auth registration/login/logout, protected owner routes, the first-login setup redirect, the Phase 0 database schema and RLS policies, and basic tests. Business setup, public booking, and dashboard features are intentionally not implemented in this phase.
+This repository contains the frontend/backend foundation, Supabase Auth, protected owner routes, business setup and profile settings, a permanent booking slug, service management, weekly availability, Phase 0/1 schema protections and RLS, and basic tests. Customer booking and booking-management/dashboard features are not part of Phase 1.
 
 ## Requirements
 
@@ -44,17 +44,21 @@ The frontend loads `frontend/.env`; the backend loads `backend/.env` and falls b
 - `npm run db:reset` — reset the local database and apply migrations
 - `npm run db:test` — run the pgTAP RLS/schema checks against the local database
 
-## Phase 0 routes
+## Owner routes
 
 - `/` — owner-focused entry page
 - `/register` and `/login` — Supabase Auth flows
 - `/app/*` — session-protected owner routes
-- `/app/setup` — authenticated first-run destination; business creation is Phase 1
+- `/app/setup` — first business creation with a permanent booking slug
+- `/app` — setup progress for services and availability
+- `/app/services` — create, edit, activate, and deactivate services
+- `/app/availability` — replace the seven-day weekly schedule
+- `/app/settings` — business name, timezone, and stable booking link
 - `GET /api/health` — API health check
-- `GET /api/owner/business` — authenticated, RLS-scoped initial setup lookup
+- `/api/owner/business`, `/api/owner/services`, `/api/owner/availability` — authenticated, RLS-scoped owner configuration API
 
 Owner API requests verify the Supabase access token on the server and query Postgres using that same token. This means Postgres RLS applies to API reads; no service-role credential is required or included. The database migration also denies the `anon` role all access to owner tables.
 
 ## Verification limits
 
-The unit tests run without Supabase credentials. RLS and exclusion constraints are defined in migrations, with a pgTAP test under `supabase/tests/`. Run `npm run db:reset` followed by `npm run db:test` against a local Supabase stack to verify the policies against Postgres. A live registration/session check also requires a configured Supabase project and Auth email settings.
+The unit tests run without Supabase credentials. RLS, stable-slug/timezone protections, and the atomic weekly-availability replacement are defined in migrations, with pgTAP checks under `supabase/tests/`. Run `npm run db:reset` followed by `npm run db:test` against a local Supabase stack to verify the policies against Postgres. A live registration/session check also requires a configured Supabase project and Auth email settings.
