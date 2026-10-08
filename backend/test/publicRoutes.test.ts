@@ -7,6 +7,8 @@ import type { AppConfig } from '../src/config.js';
 const config: AppConfig = {
   supabaseUrl: 'https://example.supabase.co',
   supabasePublishableKey: 'publishable-test-key',
+  emailEnabled: true,
+  appUrl: 'https://opna.example',
   port: 3001,
   corsOrigins: ['http://localhost:5173'],
 };
@@ -22,12 +24,19 @@ type FakeResponses = {
   many?: Record<string, Result>;
   maybeSingle?: Record<string, Result>;
   single?: Record<string, Result>;
+  ownerEmail?: string;
+  ownerLookupError?: unknown;
 };
 
 function fakePublicClient(responses: FakeResponses = {}) {
   const calls: { table: string; method: string; args: unknown[] }[] = [];
+  const ownerLookup = vi.fn().mockResolvedValue({
+    data: { user: responses.ownerEmail ? { email: responses.ownerEmail } : null },
+    error: responses.ownerLookupError ?? null,
+  });
   const defaults: Result = { data: [], error: null, count: 0 };
   const client = {
+    auth: { admin: { getUserById: ownerLookup } },
     from(table: string) {
       const query: Record<string, unknown> = {};
       for (const method of ['select', 'insert', 'eq', 'ilike', 'order', 'limit', 'in', 'gt', 'lt']) {
@@ -43,16 +52,23 @@ function fakePublicClient(responses: FakeResponses = {}) {
       return query;
     },
   } as unknown as SupabaseClient;
-  return { client, calls };
+  return { client, calls, ownerLookup };
 }
 
-function appWithPublicClient(fake = fakePublicClient(), extra: { rateLimit?: { limit: number; windowMs: number } } = {}) {
+function appWithPublicClient(fake = fakePublicClient(), extra: {
+  rateLimit?: { limit: number; windowMs: number };
+  emailEnabled?: boolean;
+  emailSender?: (email: { to: string; subject: string; html: string; text: string }) => Promise<void>;
+  emailFailureReporter?: (flow: string) => void;
+} = {}) {
   const app = createApp({
-    config,
+    config: { ...config, emailEnabled: extra.emailEnabled ?? config.emailEnabled },
     createUserClient: vi.fn(),
     createPublicClient: () => fake.client,
     publicRateLimit: extra.rateLimit,
     publicNow: () => fixedNow,
+    emailSender: extra.emailSender ?? vi.fn().mockResolvedValue(undefined),
+    emailFailureReporter: extra.emailFailureReporter ?? vi.fn(),
   });
   return { app, fake };
 }
@@ -169,6 +185,116 @@ describe('public business and booking API', () => {
       service_name_snapshot: 'Consultation', duration_minutes_snapshot: 30,
       starts_at: inserted.starts_at, ends_at: inserted.ends_at, status: 'confirmed',
     });
+  });
+
+  it('sends a customer confirmation after the booking insert succeeds', async () => {
+    const inserted = {
+      id: 'booking-reference', service_name_snapshot: service.name, duration_minutes_snapshot: 30,
+      starts_at: '2026-10-07T08:00:00Z', ends_at: '2026-10-07T08:30:00Z', status: 'confirmed',
+    };
+    const fake = fakePublicClient({
+      maybeSingle: { businesses: { data: business, error: null }, services: { data: service, error: null } },
+      many: { weekly_availability: { data: availability, error: null }, bookings: { data: [], error: null } },
+      single: { bookings: { data: inserted, error: null } },
+    });
+    const emailSender = vi.fn().mockResolvedValue(undefined);
+    const { app } = appWithPublicClient(fake, { emailSender });
+
+    await request(app).post('/api/public/businesses/northside-studio/bookings').send({
+      serviceId, startsAt: inserted.starts_at, customerName: 'Taylor <script>alert(1)</script>', customerEmail: 'taylor@example.test',
+    }).expect(201);
+
+    expect(fake.calls.some((call) => call.table === 'bookings' && call.method === 'insert')).toBe(true);
+    expect(emailSender).toHaveBeenCalledTimes(1);
+    expect(emailSender.mock.calls[0]?.[0]).toMatchObject({
+      to: 'taylor@example.test',
+      subject: 'Booking confirmed: Northside Studio',
+    });
+    expect(emailSender.mock.calls[0]?.[0].html).toContain('Northside Studio');
+    expect(emailSender.mock.calls[0]?.[0].html).toContain('Consultation');
+    expect(emailSender.mock.calls[0]?.[0].html).toContain('Europe/London');
+    expect(emailSender.mock.calls[0]?.[0].html).toContain('Taylor &lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(emailSender.mock.calls[0]?.[0].html).not.toContain('<script>');
+  });
+
+  it('creates bookings without email lookups, sends, or failure logs when email is disabled', async () => {
+    const ownerId = '11111111-1111-4111-8111-111111111111';
+    const inserted = {
+      id: 'booking-reference', service_name_snapshot: service.name, duration_minutes_snapshot: 30,
+      starts_at: '2026-10-07T08:00:00Z', ends_at: '2026-10-07T08:30:00Z', status: 'confirmed',
+    };
+    const fake = fakePublicClient({
+      maybeSingle: { businesses: { data: { ...business, owner_id: ownerId }, error: null }, services: { data: service, error: null } },
+      many: { weekly_availability: { data: availability, error: null }, bookings: { data: [], error: null } },
+      single: { bookings: { data: inserted, error: null } },
+    });
+    const emailSender = vi.fn();
+    const emailFailureReporter = vi.fn();
+    const { app } = appWithPublicClient(fake, { emailEnabled: false, emailSender, emailFailureReporter });
+
+    const response = await request(app).post('/api/public/businesses/northside-studio/bookings').send({
+      serviceId, startsAt: inserted.starts_at, customerName: 'Taylor Customer', customerEmail: 'taylor@example.test',
+    }).expect(201);
+
+    expect(response.body.data.status).toBe('confirmed');
+    expect(fake.calls.some((call) => call.table === 'bookings' && call.method === 'insert')).toBe(true);
+    expect(fake.ownerLookup).not.toHaveBeenCalled();
+    expect(emailSender).not.toHaveBeenCalled();
+    expect(emailFailureReporter).not.toHaveBeenCalled();
+  });
+
+  it('looks up the business owner in Supabase Auth and sends a new-booking notification', async () => {
+    const ownerId = '11111111-1111-4111-8111-111111111111';
+    const emailBusiness = { ...business, owner_id: ownerId };
+    const inserted = {
+      id: 'booking-reference', service_name_snapshot: service.name, duration_minutes_snapshot: 30,
+      starts_at: '2026-10-07T08:00:00Z', ends_at: '2026-10-07T08:30:00Z', status: 'confirmed',
+    };
+    const fake = fakePublicClient({
+      maybeSingle: { businesses: { data: emailBusiness, error: null }, services: { data: service, error: null } },
+      many: { weekly_availability: { data: availability, error: null }, bookings: { data: [], error: null } },
+      single: { bookings: { data: inserted, error: null } },
+      ownerEmail: 'owner@example.test',
+    });
+    const emailSender = vi.fn().mockResolvedValue(undefined);
+    const { app } = appWithPublicClient(fake, { emailSender });
+
+    await request(app).post('/api/public/businesses/northside-studio/bookings').send({
+      serviceId, startsAt: inserted.starts_at, customerName: 'Taylor Customer', customerEmail: 'taylor@example.test',
+    }).expect(201);
+
+    expect(fake.ownerLookup).toHaveBeenCalledWith(ownerId);
+    expect(emailSender).toHaveBeenCalledTimes(2);
+    const ownerNotification = emailSender.mock.calls[1]?.[0];
+    expect(ownerNotification).toMatchObject({ to: 'owner@example.test', subject: 'New booking: Northside Studio' });
+    expect(ownerNotification?.html).toContain('Taylor Customer');
+    expect(ownerNotification?.html).toContain('taylor@example.test');
+    expect(ownerNotification?.html).toContain('Consultation');
+    expect(ownerNotification?.html).toContain('Europe/London');
+  });
+
+  it('keeps a successful booking when transactional email delivery fails', async () => {
+    const inserted = {
+      id: 'booking-reference', service_name_snapshot: service.name, duration_minutes_snapshot: 30,
+      starts_at: '2026-10-07T08:00:00Z', ends_at: '2026-10-07T08:30:00Z', status: 'confirmed',
+    };
+    const fake = fakePublicClient({
+      maybeSingle: { businesses: { data: business, error: null }, services: { data: service, error: null } },
+      many: { weekly_availability: { data: availability, error: null }, bookings: { data: [], error: null } },
+      single: { bookings: { data: inserted, error: null } },
+    });
+    const emailSender = vi.fn().mockRejectedValue(new Error('private provider details'));
+    const emailFailureReporter = vi.fn();
+    const { app } = appWithPublicClient(fake, { emailSender, emailFailureReporter });
+
+    const response = await request(app).post('/api/public/businesses/northside-studio/bookings').send({
+      serviceId, startsAt: inserted.starts_at, customerName: 'Taylor Customer', customerEmail: 'taylor@example.test',
+    }).expect(201);
+
+    expect(response.body.data.status).toBe('confirmed');
+    expect(fake.calls.some((call) => call.table === 'bookings' && call.method === 'insert')).toBe(true);
+    expect(emailFailureReporter).toHaveBeenCalledWith('customer_booking_confirmation');
+    expect(JSON.stringify(emailFailureReporter.mock.calls)).not.toContain('private provider details');
   });
 
   it('returns 409 SLOT_UNAVAILABLE for a database overlap race', async () => {

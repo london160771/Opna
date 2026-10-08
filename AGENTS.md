@@ -2,7 +2,7 @@
 
 ## Objective and authority
 
-Build a lightweight, two-sided booking MVP. Owners run one business; customers book without an account. Opna is a booking tool, not a marketplace. `SPEC.md` defines behavior; `DESIGN.md` defines the interface. These three files are the implementation contract. Follow explicit user changes over these files; otherwise do not expand scope.
+Build Opna, a lightweight, two-sided booking product. Owners run one business; customers book without an account. Opna is a booking tool, not a marketplace. V1.1 includes transactional booking and cancellation emails. `EMAIL_ENABLED` controls outbound delivery; the current deployment uses `EMAIL_ENABLED=false`, with the Resend implementation preserved for future use. `SPEC.md` defines behavior; `DESIGN.md` defines the interface. These three files are the implementation contract. Follow explicit user changes over these files; otherwise do not expand scope.
 
 ## Stack and working rules
 
@@ -19,7 +19,7 @@ Build a lightweight, two-sided booking MVP. Owners run one business; customers b
 
 ## Non-negotiable boundaries
 
-No payments, AI, teams, multiple locations, recurring appointments, rescheduling, customer cancellation, calendar sync, appointment notifications, WhatsApp automation, or complex scheduling. No customer accounts, marketplace listings, recommendations, reviews, or discovery filters. Weekly availability repeats; individual bookings do not recur.
+No payments, AI, teams, multiple locations, recurring appointments, rescheduling, customer cancellation, calendar sync, scheduled reminders, marketing email, WhatsApp automation, or complex scheduling. Transactional appointment emails are included in V1.1 and are sent through the existing Resend implementation only when `EMAIL_ENABLED=true`; disabling email does not affect booking or cancellation writes. No customer accounts, marketplace listings, recommendations, reviews, or discovery filters. Weekly availability repeats; individual bookings do not recur.
 
 One owner → one business; one business → one timezone and one simultaneous appointment. Services do not have separate capacity. One availability window per weekday. Confirmed and completed bookings retain their stored appointment times; cancellation frees capacity. Never rely on a pre-insert conflict query alone.
 

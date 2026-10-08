@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { getOwnerAvailability, OwnerApiError, saveOwnerAvailability, type AvailabilityWindow } from '../api/owner';
 import { useAuth } from '../auth/AuthProvider';
 import { Loading } from '../components/Loading';
-import { OwnerWorkspace } from '../components/OwnerWorkspace';
 import { validateAvailabilityWindows } from '../lib/ownerValidation';
 
 const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -34,7 +33,7 @@ export function AvailabilityPage() {
       .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'We could not load your availability.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [attempt, session?.access_token]);
+  }, [attempt, session?.user.id]);
 
   function updateDay(weekday: number, patch: Partial<DaySetting>) {
     setDays((current) => current.map((day, index) => index === weekday ? { ...day, ...patch } : day));
@@ -60,7 +59,7 @@ export function AvailabilityPage() {
   }
 
   return (
-    <OwnerWorkspace>
+    <>
       <div><p className="text-sm font-semibold text-blue-700">When you’re available</p><h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Weekly availability</h1><p className="mt-2 max-w-2xl text-slate-600">Set one opening window for each day. Closed days will not offer booking times.</p></div>
       {loading ? <div className="mt-6 rounded-xl border border-slate-200 bg-white"><Loading label="Loading weekly availability" /></div>
         : loadError ? <div className="mt-6 rounded-xl border border-red-200 bg-white p-5"><p role="alert" className="text-sm text-red-800">{loadError}</p><button type="button" onClick={() => setAttempt((value) => value + 1)} className="mt-3 min-h-11 rounded-lg px-3 font-semibold text-blue-700 hover:bg-blue-50">Try again</button></div>
@@ -85,6 +84,6 @@ export function AvailabilityPage() {
             {saved && <p role="status" aria-live="polite" className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm font-medium text-emerald-900">Weekly availability saved.</p>}
             <div className="mt-5 flex flex-wrap items-center gap-3"><button type="submit" disabled={saving} className="min-h-12 rounded-lg bg-blue-700 px-5 font-semibold text-white hover:bg-blue-800 disabled:opacity-60">{saving ? 'Saving availability…' : 'Save availability'}</button><span className="text-sm text-slate-500">{days.filter((day) => day.open).length} of 7 days open</span></div>
           </form>}
-    </OwnerWorkspace>
+    </>
   );
 }

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   createContext,
   useContext,
   useEffect,
@@ -47,6 +48,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const signOut = useCallback(async () => {
+    if (!supabase) throw new Error('Authentication is not configured.');
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  }, []);
+
   const value = useMemo<AuthContextValue>(() => ({
     session,
     loading,
@@ -66,12 +73,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       return Boolean(data.session);
     },
-    async signOut() {
-      if (!supabase) throw new Error('Authentication is not configured.');
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-    },
-  }), [session, loading]);
+    signOut,
+  }), [session, loading, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

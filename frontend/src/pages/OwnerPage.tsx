@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { getOwnerAvailability, getOwnerBusiness, getOwnerDashboard, getOwnerServices, type OwnerBusiness, type OwnerDashboard } from '../api/owner';
 import { useAuth } from '../auth/AuthProvider';
 import { Loading } from '../components/Loading';
-import { OwnerWorkspace } from '../components/OwnerWorkspace';
 import { formatBookingDateTime } from '../lib/bookingFormat';
 
 type OverviewData = {
@@ -42,7 +41,7 @@ export function OwnerPage() {
       if (active) setError(reason instanceof Error ? reason.message : 'We could not load your dashboard.');
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [attempt, session?.access_token]);
+  }, [attempt, session?.user.id]);
 
   async function copyBookingLink() {
     if (!data) return;
@@ -56,7 +55,7 @@ export function OwnerPage() {
   }
 
   return (
-    <OwnerWorkspace>
+    <>
       <div>
         <p className="text-sm font-semibold text-blue-700">Your business</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Overview</h1>
@@ -113,7 +112,7 @@ export function OwnerPage() {
               </div>
             </section>}
           </div>}
-    </OwnerWorkspace>
+    </>
   );
 }
 

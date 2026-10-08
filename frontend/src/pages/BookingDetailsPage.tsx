@@ -4,7 +4,6 @@ import { getOwnerBooking, OwnerApiError, updateOwnerBookingStatus, type OwnerBoo
 import { useAuth } from '../auth/AuthProvider';
 import { BookingStatusBadge } from '../components/BookingStatusBadge';
 import { Loading } from '../components/Loading';
-import { OwnerWorkspace } from '../components/OwnerWorkspace';
 import { formatBookingDate, formatBookingTime } from '../lib/bookingFormat';
 
 export function BookingDetailsPage() {
@@ -16,6 +15,7 @@ export function BookingDetailsPage() {
   const [attempt, setAttempt] = useState(0);
   const [actionError, setActionError] = useState('');
   const [actionMessage, setActionMessage] = useState('');
+  const [cancellationMessage, setCancellationMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -36,18 +36,19 @@ export function BookingDetailsPage() {
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [attempt, id, session?.access_token]);
+  }, [attempt, id, session?.user.id]);
 
   async function changeStatus(status: 'completed' | 'cancelled') {
     if (!session || !booking || saving) return;
-    if (status === 'cancelled' && !window.confirm('Cancel this booking? This releases the appointment time and does not notify the customer.')) return;
+    if (status === 'cancelled' && !window.confirm('Cancel this booking? This releases the appointment time. If transactional email is enabled, Opna will attempt to email the customer your optional message.')) return;
     setSaving(true);
     setActionError('');
     setActionMessage('');
     try {
-      const updated = await updateOwnerBookingStatus(session.access_token, booking.id, status);
+      const updated = await updateOwnerBookingStatus(session.access_token, booking.id, status, status === 'cancelled' ? cancellationMessage : undefined);
       setBooking(updated);
       setActionMessage(status === 'cancelled' ? 'Booking cancelled. Its time is available again.' : 'Booking marked as completed.');
+      setCancellationMessage('');
     } catch (error) {
       setActionError(error instanceof OwnerApiError ? error.message : error instanceof Error ? error.message : 'We could not update this booking. Try again.');
     } finally {
@@ -58,7 +59,7 @@ export function BookingDetailsPage() {
   const canComplete = Boolean(booking && Date.parse(booking.endsAt) <= now);
 
   return (
-    <OwnerWorkspace>
+    <>
       <Link to="/app/bookings" className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-semibold text-blue-700 hover:bg-blue-50">← Back to bookings</Link>
       {loading ? <div className="mt-4 rounded-xl border border-slate-200 bg-white"><Loading label="Loading booking details" /></div>
         : loadError ? <section className="mt-4 max-w-2xl rounded-xl border border-red-200 bg-white p-5">
@@ -88,7 +89,12 @@ export function BookingDetailsPage() {
 
             {booking.status === 'confirmed' && <section className="mt-5 rounded-xl border border-slate-200 bg-white p-5 sm:p-6" aria-labelledby="booking-actions-heading">
               <h2 id="booking-actions-heading" className="text-lg font-semibold text-slate-900">Update booking status</h2>
-              <p className="mt-1 text-sm text-slate-600">Completed appointments keep their time reserved. Cancelling releases this time and does not notify the customer.</p>
+              <p className="mt-1 text-sm text-slate-600">Completed appointments keep their time reserved. Cancelling releases this time. If transactional email is enabled, Opna will attempt to send the customer a cancellation email.</p>
+              <div className="mt-4">
+                <label htmlFor="cancellation-message" className="block text-sm font-semibold text-slate-800">Message to customer (optional)</label>
+                <textarea id="cancellation-message" value={cancellationMessage} maxLength={1000} rows={4} onChange={(event) => setCancellationMessage(event.target.value)} aria-describedby="cancellation-message-hint" className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900" placeholder="Add a short explanation or note." />
+                <p id="cancellation-message-hint" className="mt-1 text-sm text-slate-500">If transactional email is enabled and sending succeeds, this appears in the cancellation email. The message is saved with the booking either way. Up to 1,000 characters.</p>
+              </div>
               {actionError && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{actionError}</p>}
               {actionMessage && <p role="status" className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{actionMessage}</p>}
               <div className="mt-5 flex flex-col gap-3 sm:flex-row">
@@ -101,11 +107,12 @@ export function BookingDetailsPage() {
             {booking.status !== 'confirmed' && <section className="mt-5 rounded-xl border border-slate-200 bg-white p-5" aria-live="polite">
               <h2 className="font-semibold text-slate-900">This booking is {booking.status}.</h2>
               <p className="mt-1 text-sm text-slate-600">Booking status cannot be changed again.</p>
+              {booking.status === 'cancelled' && booking.cancellationMessage && <p className="mt-3 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-700"><strong>Saved cancellation message:</strong> {booking.cancellationMessage}</p>}
               {actionMessage && <p role="status" className="mt-3 text-sm text-emerald-900">{actionMessage}</p>}
               {actionError && <p role="alert" className="mt-3 text-sm text-red-800">{actionError}</p>}
             </section>}
           </div>}
-    </OwnerWorkspace>
+    </>
   );
 }
 

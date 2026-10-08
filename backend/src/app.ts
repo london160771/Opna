@@ -9,6 +9,7 @@ import { registerOwnerRoutes } from './ownerRoutes.js';
 import { registerPublicRoutes } from './publicRoutes.js';
 import { createPublicRateLimit, type PublicRateLimitOptions } from './publicRateLimit.js';
 import { createPublicSupabaseFactory, type PublicSupabaseFactory } from './supabase.js';
+import { createResendEmailSender, reportEmailFailure, type EmailFailureReporter, type TransactionalEmailRuntime, type TransactionalEmailSender } from './transactionalEmail.js';
 
 type AppDependencies = {
   config: AppConfig;
@@ -16,10 +17,18 @@ type AppDependencies = {
   createPublicClient?: PublicSupabaseFactory;
   publicRateLimit?: PublicRateLimitOptions;
   publicNow?: () => Date;
+  emailSender?: TransactionalEmailSender;
+  emailFailureReporter?: EmailFailureReporter;
 };
 
-export function createApp({ config, createUserClient = createUserSupabaseFactory(config), createPublicClient = createPublicSupabaseFactory(config), publicRateLimit, publicNow }: AppDependencies) {
+export function createApp({ config, createUserClient = createUserSupabaseFactory(config), createPublicClient = createPublicSupabaseFactory(config), publicRateLimit, publicNow, emailSender, emailFailureReporter }: AppDependencies) {
   const app = express();
+  const emailRuntime: TransactionalEmailRuntime = {
+    enabled: config.emailEnabled,
+    send: emailSender ?? createResendEmailSender(config),
+    reportFailure: emailFailureReporter ?? reportEmailFailure,
+    ...(config.appUrl ? { appUrl: config.appUrl } : {}),
+  };
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(cors({
@@ -57,12 +66,12 @@ export function createApp({ config, createUserClient = createUserSupabaseFactory
 
   const publicRouter = Router();
   publicRouter.use(createPublicRateLimit(publicRateLimit));
-  registerPublicRoutes(publicRouter, createPublicClient, publicNow);
+  registerPublicRoutes(publicRouter, createPublicClient, emailRuntime, publicNow);
   app.use('/api/public', publicRouter);
 
   const ownerRouter = Router();
   ownerRouter.use(requireOwner(createUserClient));
-  registerOwnerRoutes(ownerRouter);
+  registerOwnerRoutes(ownerRouter, emailRuntime);
   app.use('/api/owner', ownerRouter);
 
   const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => {

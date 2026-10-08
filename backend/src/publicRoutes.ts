@@ -3,6 +3,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Temporal } from '@js-temporal/polyfill';
 import { BookingRuleError, generateBookingSlots, getBookingDateRange, resolveBookableSlot, validateBookableDate, type BookingWindow } from './bookingRules.js';
 import type { PublicSupabaseFactory } from './supabase.js';
+import {
+  createCustomerBookingConfirmation,
+  createOwnerNewBookingNotification,
+  reportEmailFailureSafely,
+  sendEmailBestEffort,
+  type TransactionalEmail,
+  type TransactionalEmailRuntime,
+} from './transactionalEmail.js';
 
 type ServiceRow = { id: string; name: string; duration_minutes: number };
 type AvailabilityRow = { weekday: number; start_local: string; end_local: string };
@@ -47,7 +55,7 @@ function mapAvailability(rows: AvailabilityRow[]): BookingWindow[] {
 
 async function getBusiness(client: SupabaseClient, slug: string) {
   return client.from('businesses')
-    .select('id, name, slug, timezone')
+    .select('id, name, slug, timezone, owner_id')
     .eq('slug', slug)
     .maybeSingle();
 }
@@ -92,7 +100,7 @@ function escapedLike(value: string) {
   return value.replace(/[\\%_]/g, '\\$&');
 }
 
-export function registerPublicRoutes(router: Router, getClient: PublicSupabaseFactory, now: () => Date = () => new Date()) {
+export function registerPublicRoutes(router: Router, getClient: PublicSupabaseFactory, emailRuntime: TransactionalEmailRuntime, now: () => Date = () => new Date()) {
   router.get('/businesses', async (req: Request, res: Response) => {
     const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
     if (query.length > 100) return sendError(res, 400, 'INVALID_REQUEST', 'Search text must be 100 characters or fewer.', { query: 'Use 100 characters or fewer.' });
@@ -270,6 +278,59 @@ export function registerPublicRoutes(router: Router, getClient: PublicSupabaseFa
       status: 'confirmed',
     }).select('id, service_name_snapshot, duration_minutes_snapshot, starts_at, ends_at, status').single();
     if (error) return databaseFailure(res, error);
+
+    const customerName = (body.customerName as string).trim();
+    const customerEmail = (body.customerEmail as string).trim().toLowerCase();
+    const emailDetails = {
+      businessName: business.name,
+      businessSlug: business.slug,
+      serviceName: booking.service_name_snapshot,
+      customerName,
+      customerEmail,
+      startsAt: booking.starts_at,
+      endsAt: booking.ends_at,
+      timezone: business.timezone,
+      reference: booking.id,
+      durationMinutes: booking.duration_minutes_snapshot,
+    };
+
+    if (emailRuntime.enabled) {
+      let confirmationEmail: TransactionalEmail | undefined;
+      try {
+        confirmationEmail = createCustomerBookingConfirmation(emailDetails);
+      } catch {
+        reportEmailFailureSafely(emailRuntime, 'customer_booking_confirmation');
+      }
+
+      let ownerEmail: string | undefined;
+      try {
+        if (!business.owner_id) {
+          reportEmailFailureSafely(emailRuntime, 'owner_notification_recipient_lookup');
+        } else {
+          const { data: ownerResult, error: ownerError } = await client.auth.admin.getUserById(business.owner_id);
+          if (ownerError || !ownerResult.user?.email) {
+            reportEmailFailureSafely(emailRuntime, 'owner_notification_recipient_lookup');
+          } else {
+            ownerEmail = ownerResult.user.email;
+          }
+        }
+      } catch {
+        reportEmailFailureSafely(emailRuntime, 'owner_notification_recipient_lookup');
+      }
+
+      let ownerNotificationEmail: TransactionalEmail | undefined;
+      try {
+        if (ownerEmail) ownerNotificationEmail = createOwnerNewBookingNotification(emailDetails, ownerEmail);
+      } catch {
+        reportEmailFailureSafely(emailRuntime, 'owner_new_booking_notification');
+      }
+
+      await Promise.all([
+        confirmationEmail ? sendEmailBestEffort(emailRuntime, 'customer_booking_confirmation', confirmationEmail) : Promise.resolve(),
+        ownerNotificationEmail ? sendEmailBestEffort(emailRuntime, 'owner_new_booking_notification', ownerNotificationEmail) : Promise.resolve(),
+      ]);
+    }
+
     return res.status(201).json({ data: {
       reference: booking.id,
       businessName: business.name,

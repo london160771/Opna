@@ -1,7 +1,8 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthProvider';
 import { AuthForm } from './components/AuthForm';
 import { OwnerGuard } from './components/OwnerGuard';
+import { OwnerWorkspace } from './components/OwnerWorkspace';
 import { HomePage } from './pages/HomePage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { OwnerPage } from './pages/OwnerPage';
@@ -13,6 +14,10 @@ import { PublicBookingPage } from './pages/PublicBookingPage';
 import { BookingsPage } from './pages/BookingsPage';
 import { BookingDetailsPage } from './pages/BookingDetailsPage';
 
+function OwnerLayout() {
+  return <OwnerGuard><OwnerWorkspace><Outlet /></OwnerWorkspace></OwnerGuard>;
+}
+
 export function App() {
   return (
     <BrowserRouter>
@@ -23,12 +28,14 @@ export function App() {
           <Route path="/register" element={<AuthForm mode="register" />} />
           <Route path="/login" element={<AuthForm mode="login" />} />
           <Route path="/app/setup" element={<OwnerGuard setupPage><SetupPage /></OwnerGuard>} />
-          <Route path="/app" element={<OwnerGuard><OwnerPage /></OwnerGuard>} />
-          <Route path="/app/bookings" element={<OwnerGuard><BookingsPage /></OwnerGuard>} />
-          <Route path="/app/bookings/:id" element={<OwnerGuard><BookingDetailsPage /></OwnerGuard>} />
-          <Route path="/app/services" element={<OwnerGuard><ServicesPage /></OwnerGuard>} />
-          <Route path="/app/availability" element={<OwnerGuard><AvailabilityPage /></OwnerGuard>} />
-          <Route path="/app/settings" element={<OwnerGuard><SettingsPage /></OwnerGuard>} />
+          <Route element={<OwnerLayout />}>
+            <Route path="/app" element={<OwnerPage />} />
+            <Route path="/app/bookings" element={<BookingsPage />} />
+            <Route path="/app/bookings/:id" element={<BookingDetailsPage />} />
+            <Route path="/app/services" element={<ServicesPage />} />
+            <Route path="/app/availability" element={<AvailabilityPage />} />
+            <Route path="/app/settings" element={<SettingsPage />} />
+          </Route>
           <Route path="/app/*" element={<Navigate to="/app" replace />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

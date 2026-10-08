@@ -7,11 +7,13 @@ import type { AppConfig } from '../src/config.js';
 const config: AppConfig = {
   supabaseUrl: 'https://example.supabase.co',
   supabasePublishableKey: 'publishable-test-key',
+  emailEnabled: true,
+  appUrl: 'https://opna.example',
   port: 3001,
   corsOrigins: ['http://localhost:5173'],
 };
 
-const business = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', timezone: 'Europe/London' };
+const business = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Northside Studio', slug: 'northside-studio', timezone: 'Europe/London' };
 const futureBooking = {
   id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   business_id: business.id,
@@ -20,6 +22,7 @@ const futureBooking = {
   duration_minutes_snapshot: 30,
   customer_name: 'A Customer',
   customer_email: 'customer@example.test',
+  cancellation_message: null,
   starts_at: new Date(Date.now() + 86_400_000).toISOString(),
   ends_at: new Date(Date.now() + 86_400_000 + 1_800_000).toISOString(),
   status: 'confirmed',
@@ -43,7 +46,11 @@ function queryFor(result: QueryResult) {
   return query;
 }
 
-function ownerApp(results: Record<string, QueryResult[]>) {
+function ownerApp(results: Record<string, QueryResult[]>, options: {
+  emailEnabled?: boolean;
+  emailSender?: (email: { to: string; subject: string; html: string; text: string }) => Promise<void>;
+  emailFailureReporter?: (flow: string) => void;
+} = {}) {
   const queries: Record<string, ReturnType<typeof queryFor>[]> = {};
   const offsets: Record<string, number> = {};
   const supabase = {
@@ -58,8 +65,10 @@ function ownerApp(results: Record<string, QueryResult[]>) {
       return query;
     }),
   } as unknown as SupabaseClient;
-  const app = createApp({ config, createUserClient: vi.fn(() => supabase) });
-  return { app, queries, supabase };
+  const emailSender = vi.fn(options.emailSender ?? (async () => undefined));
+  const emailFailureReporter = options.emailFailureReporter ?? vi.fn();
+  const app = createApp({ config: { ...config, emailEnabled: options.emailEnabled ?? config.emailEnabled }, createUserClient: vi.fn(() => supabase), emailSender, emailFailureReporter });
+  return { app, queries, supabase, emailSender, emailFailureReporter };
 }
 
 function ok(data: unknown, count?: number): QueryResult {
@@ -158,7 +167,7 @@ describe('owner booking routes', () => {
   });
 
   it('cancels a confirmed booking with a conditional owner-scoped update', async () => {
-    const cancelled = { ...futureBooking, status: 'cancelled' };
+    const cancelled = { ...futureBooking, status: 'cancelled', cancellation_message: null };
     const { app, queries } = ownerApp({
       businesses: [ok(business)],
       bookings: [ok(futureBooking), ok(cancelled)],
@@ -168,9 +177,76 @@ describe('owner booking routes', () => {
 
     expect(response.body.data.status).toBe('cancelled');
     expect(response.body.data.customerEmail).toBe('customer@example.test');
-    expect(queries.bookings?.[1]?.calls.update).toEqual([[{ status: 'cancelled' }]]);
+    expect(queries.bookings?.[1]?.calls.update).toEqual([[{ status: 'cancelled', cancellation_message: null }]]);
     expect(queries.bookings?.[1]?.calls.eq).toContainEqual(['business_id', business.id]);
     expect(queries.bookings?.[1]?.calls.eq).toContainEqual(['status', 'confirmed']);
+  });
+
+  it('sends the customer a cancellation email with the saved custom message after the update succeeds', async () => {
+    const message = 'Sorry, an emergency came up. <img src=x onerror=alert(1)> Please choose a new time.';
+    const cancelled = { ...futureBooking, status: 'cancelled', cancellation_message: message };
+    const { app, queries, emailSender } = ownerApp({
+      businesses: [ok(business)],
+      bookings: [ok(futureBooking), ok(cancelled)],
+    });
+
+    const response = await request(app).patch(`/api/owner/bookings/${futureBooking.id}/status`)
+      .set('Authorization', 'Bearer owner-a-token')
+      .send({ status: 'cancelled', cancellationMessage: message })
+      .expect(200);
+
+    expect(queries.bookings?.[1]?.calls.update).toEqual([[
+      { status: 'cancelled', cancellation_message: message },
+    ]]);
+    expect(response.body.data.cancellationMessage).toBe(message);
+    expect(emailSender).toHaveBeenCalledTimes(1);
+    const email = emailSender.mock.calls[0]?.[0];
+    expect(email).toMatchObject({ to: futureBooking.customer_email, subject: 'Booking cancelled: Northside Studio' });
+    expect(email?.html).toContain('Consultation');
+    expect(email?.html).toContain('Book another time');
+    expect(email?.html).toContain('https://opna.example/book/northside-studio');
+    expect(email?.html).toContain('Sorry, an emergency came up. &lt;img src=x onerror=alert(1)&gt; Please choose a new time.');
+    expect(email?.html).not.toContain('<img');
+  });
+
+  it('returns cancellation success when email delivery fails and logs only the flow', async () => {
+    const cancelled = { ...futureBooking, status: 'cancelled', cancellation_message: null };
+    const emailSender = vi.fn().mockRejectedValue(new Error('private provider details'));
+    const emailFailureReporter = vi.fn();
+    const { app } = ownerApp({ businesses: [ok(business)], bookings: [ok(futureBooking), ok(cancelled)] }, {
+      emailSender,
+      emailFailureReporter,
+    });
+
+    const response = await request(app).patch(`/api/owner/bookings/${futureBooking.id}/status`)
+      .set('Authorization', 'Bearer owner-a-token').send({ status: 'cancelled' }).expect(200);
+
+    expect(response.body.data.status).toBe('cancelled');
+    expect(emailFailureReporter).toHaveBeenCalledWith('owner_booking_cancellation');
+    expect(JSON.stringify(emailFailureReporter.mock.calls)).not.toContain('private provider details');
+  });
+
+  it('saves cancellation messages and succeeds without sending or logging when email is disabled', async () => {
+    const message = 'The owner needs to reschedule this appointment.';
+    const cancelled = { ...futureBooking, status: 'cancelled', cancellation_message: message };
+    const emailFailureReporter = vi.fn();
+    const { app, queries, emailSender } = ownerApp({
+      businesses: [ok(business)],
+      bookings: [ok(futureBooking), ok(cancelled)],
+    }, { emailEnabled: false, emailFailureReporter });
+
+    const response = await request(app).patch(`/api/owner/bookings/${futureBooking.id}/status`)
+      .set('Authorization', 'Bearer owner-a-token')
+      .send({ status: 'cancelled', cancellationMessage: message })
+      .expect(200);
+
+    expect(response.body.data.status).toBe('cancelled');
+    expect(response.body.data.cancellationMessage).toBe(message);
+    expect(queries.bookings?.[1]?.calls.update).toEqual([[
+      { status: 'cancelled', cancellation_message: message },
+    ]]);
+    expect(emailSender).not.toHaveBeenCalled();
+    expect(emailFailureReporter).not.toHaveBeenCalled();
   });
 
   it('marks an ended confirmed booking complete and treats a repeated action as a no-op', async () => {
@@ -198,10 +274,11 @@ describe('owner booking routes', () => {
 
   it('treats an already-cancelled booking as a no-op', async () => {
     const cancelled = { ...futureBooking, status: 'cancelled' };
-    const { app, queries } = ownerApp({ businesses: [ok(business)], bookings: [ok(cancelled)] });
+    const { app, queries, emailSender } = ownerApp({ businesses: [ok(business)], bookings: [ok(cancelled)] });
     await request(app).patch(`/api/owner/bookings/${futureBooking.id}/status`)
       .set('Authorization', 'Bearer owner-a-token').send({ status: 'cancelled' })
       .expect(200).expect(({ body }) => expect(body.data.status).toBe('cancelled'));
     expect(queries.bookings).toHaveLength(1);
+    expect(emailSender).not.toHaveBeenCalled();
   });
 });

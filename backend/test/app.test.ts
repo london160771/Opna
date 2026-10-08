@@ -7,6 +7,7 @@ import type { AppConfig } from '../src/config.js';
 const config: AppConfig = {
   supabaseUrl: 'https://example.supabase.co',
   supabasePublishableKey: 'publishable-test-key',
+  emailEnabled: false,
   port: 3001,
   corsOrigins: ['http://localhost:5173'],
   keepaliveToken: 'test-keepalive-token',

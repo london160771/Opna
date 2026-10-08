@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { createOwnerService, getOwnerServices, OwnerApiError, updateOwnerService, type OwnerService } from '../api/owner';
 import { useAuth } from '../auth/AuthProvider';
 import { Loading } from '../components/Loading';
-import { OwnerWorkspace } from '../components/OwnerWorkspace';
 import { validateServiceInput } from '../lib/ownerValidation';
 
 export function ServicesPage() {
@@ -30,7 +29,7 @@ export function ServicesPage() {
       .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'We could not load your services.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [attempt, session?.access_token]);
+  }, [attempt, session?.user.id]);
 
   function beginCreate() {
     setEditing(null); setName(''); setDuration(30); setErrors({}); setSaveError(''); setCreating(true);
@@ -69,7 +68,7 @@ export function ServicesPage() {
   }
 
   return (
-    <OwnerWorkspace>
+    <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="text-sm font-semibold text-blue-700">Your offer</p><h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Services</h1><p className="mt-2 max-w-2xl text-slate-600">Set what customers can book and how long each appointment takes.</p></div>
         {!loading && !loadError && <button type="button" onClick={beginCreate} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800">Add service</button>}
@@ -92,6 +91,6 @@ export function ServicesPage() {
             {services.length === 0 && !creating ? <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center"><h2 className="text-lg font-semibold text-slate-900">No services yet</h2><p className="mt-2 text-slate-600">Add the first service customers can book.</p><button type="button" onClick={beginCreate} className="mt-4 min-h-11 rounded-lg bg-blue-700 px-4 font-semibold text-white hover:bg-blue-800">Add your first service</button></div> : null}
             {services.length > 0 && <div className="mt-6 space-y-3">{services.map((service) => <article key={service.id} className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2 className="break-words font-semibold text-slate-900">{service.name}</h2><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${service.isActive ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>{service.isActive ? 'Active' : 'Inactive'}</span></div><p className="mt-1 text-sm text-slate-600">{service.durationMinutes} minutes</p><p className="mt-2 text-xs text-slate-500">Existing bookings keep their saved service details.</p></div><div className="flex shrink-0 gap-2"><button type="button" onClick={() => beginEdit(service)} className="min-h-11 rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">Edit</button><button type="button" disabled={changingId === service.id || Boolean(changingId)} onClick={() => void toggleActive(service)} className="min-h-11 rounded-lg px-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50">{changingId === service.id ? 'Saving…' : service.isActive ? 'Deactivate' : 'Activate'}</button></div></article>)}</div>}
           </>}
-    </OwnerWorkspace>
+    </>
   );
 }

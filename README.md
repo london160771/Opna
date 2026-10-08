@@ -29,6 +29,10 @@ The frontend loads `frontend/.env`; the backend loads `backend/.env` and falls b
 | `SUPABASE_URL` | Backend | Supabase project URL |
 | `SUPABASE_PUBLISHABLE_KEY` | Backend | Public key used with a verified owner's bearer token; RLS remains active |
 | `SUPABASE_SECRET_KEY` | Backend only | Secret key for approved public business reads and booking writes; never expose it to the frontend |
+| `EMAIL_ENABLED` | Backend | Enables transactional email when set to `true`; set to `false` to skip all outbound email requests (defaults to `false`) |
+| `RESEND_API_KEY` | Backend only | Resend API key for transactional booking and cancellation emails |
+| `EMAIL_FROM` | Backend only | Verified sender address used by Resend |
+| `APP_URL` | Backend | Frontend origin used for the cancellation email booking link |
 | `PORT` | Backend | API port (defaults to `3001`) |
 | `CORS_ORIGINS` | Backend | Comma-separated frontend origins allowed to call the API |
 | `KEEPALIVE_TOKEN` | Backend only | Bearer token required by the Supabase activity endpoint |
@@ -68,6 +72,10 @@ The frontend loads `frontend/.env`; the backend loads `backend/.env` and falls b
 
 Owner API requests verify the Supabase access token on the server and query Postgres using that same token, so Postgres RLS applies to owner reads and writes. Public API routes use explicit response projections and a backend-only secret key to return approved public fields and create validated bookings. The database denies the `anon` role direct access to owner tables and prevents overlapping active booking intervals with an exclusion constraint.
 
+Booking confirmation, new-booking owner notification, and owner cancellation emails are implemented with Resend and sent after the corresponding database write succeeds when `EMAIL_ENABLED=true`. The current deployment uses `EMAIL_ENABLED=false`; outbound requests and delivery-failure logs are skipped while bookings, cancellations, and saved cancellation messages continue normally. The Resend implementation is preserved for future use. To enable it, set `EMAIL_ENABLED=true`, configure `RESEND_API_KEY`, a Resend-verified `EMAIL_FROM`, and the public frontend origin in `APP_URL` in `backend/.env` (and in the backend deployment environment). Email delivery is best-effort and does not undo a booking or cancellation. Cancellation messages are saved with the booking and limited to 1,000 characters.
+
+To test the full email flow, apply the latest migrations (`npm run db:reset` locally or `npx supabase db push` for the linked hosted project), set `EMAIL_ENABLED=true` and the three Resend-related backend variables, and restart the API. Create a booking through `/book/:slug`; check the customer inbox for the confirmation and the owner's inbox for the new-booking notice. Then open that booking in the owner dashboard, cancel it with a short message, and check the customer inbox for the cancellation message and “Book another time” link. Use inboxes you control and verify that the sender domain is approved by Resend.
+
 ## Verification limits
 
 The unit tests run without Supabase credentials. Schema, RLS, stable-slug/timezone protections, atomic weekly availability, and booking overlap enforcement are defined in migrations, with pgTAP checks under `supabase/tests/`. Run `npm run db:reset` followed by `npm run db:test` against a local Supabase stack to verify the database constraints and policies. The opt-in `backend/test/publicBooking.integration.test.ts` submits competing inserts to verify the overlap constraint and API conflict response; it requires `RUN_LOCAL_DB_INTEGRATION=true`, a configured backend secret key, and a Supabase URL on loopback. It refuses hosted Supabase URLs. Public route smoke tests also require a configured backend secret key.
@@ -80,6 +88,7 @@ Configure these site environment variables before the production build:
 
 - `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` for browser-side Supabase Auth.
 - `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_SECRET_KEY` for server-side API calls.
+- `EMAIL_ENABLED=false` for the current deployment. To activate transactional email later, use `true` and configure `RESEND_API_KEY`, `EMAIL_FROM`, and `APP_URL` in the backend environment.
 - `CORS_ORIGINS` with the exact deployed site origin (for example, `https://your-site.netlify.app`).
 - `KEEPALIVE_TOKEN` with a long random value kept in the site environment only.
 

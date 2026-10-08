@@ -4,7 +4,6 @@ import { getOwnerBookings, type OwnerBooking } from '../api/owner';
 import { useAuth } from '../auth/AuthProvider';
 import { BookingStatusBadge } from '../components/BookingStatusBadge';
 import { Loading } from '../components/Loading';
-import { OwnerWorkspace } from '../components/OwnerWorkspace';
 import { formatBookingDateTime } from '../lib/bookingFormat';
 
 export function BookingsPage() {
@@ -31,7 +30,7 @@ export function BookingsPage() {
       .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'We could not load your bookings.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [attempt, session?.access_token]);
+  }, [attempt, session?.user.id]);
 
   async function loadMore() {
     if (!session || !cursor || loadingMore) return;
@@ -49,7 +48,7 @@ export function BookingsPage() {
   }
 
   return (
-    <OwnerWorkspace>
+    <>
       <div>
         <p className="text-sm font-semibold text-blue-700">Appointments</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Bookings</h1>
@@ -99,6 +98,6 @@ export function BookingsPage() {
               {moreError && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{moreError}</p>}
               {cursor && <div className="mt-5 text-center"><button type="button" disabled={loadingMore} onClick={() => void loadMore()} className="min-h-11 rounded-lg border border-slate-300 bg-white px-5 font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60">{loadingMore ? 'Loading…' : 'Load more bookings'}</button></div>}
             </>}
-    </OwnerWorkspace>
+    </>
   );
 }

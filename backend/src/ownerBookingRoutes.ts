@@ -1,6 +1,12 @@
 import type { Request, Response, Router } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OwnerLocals } from './auth/requireOwner.js';
+import {
+  createOwnerCancellationEmail,
+  reportEmailFailureSafely,
+  sendEmailBestEffort,
+  type TransactionalEmailRuntime,
+} from './transactionalEmail.js';
 
 type BookingStatus = 'confirmed' | 'completed' | 'cancelled';
 type BookingRow = {
@@ -11,6 +17,7 @@ type BookingRow = {
   duration_minutes_snapshot: number;
   customer_name: string;
   customer_email?: string;
+  cancellation_message?: string | null;
   starts_at: string;
   ends_at: string;
   status: BookingStatus;
@@ -19,8 +26,8 @@ type BookingRow = {
 };
 type Cursor = { startsAt: string; id: string };
 
-const bookingFields = 'id, business_id, service_id, service_name_snapshot, duration_minutes_snapshot, customer_name, customer_email, starts_at, ends_at, status, created_at, updated_at';
-const bookingListFields = 'id, business_id, service_id, service_name_snapshot, duration_minutes_snapshot, customer_name, starts_at, ends_at, status, created_at, updated_at';
+const bookingFields = 'id, business_id, service_id, service_name_snapshot, duration_minutes_snapshot, customer_name, customer_email, cancellation_message, starts_at, ends_at, status, created_at, updated_at';
+const bookingListFields = 'id, business_id, service_id, service_name_snapshot, duration_minutes_snapshot, customer_name, cancellation_message, starts_at, ends_at, status, created_at, updated_at';
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const pageSize = 50;
 
@@ -33,7 +40,7 @@ function sendError(res: Response, status: number, code: string, message: string)
 }
 
 async function getBusiness(client: SupabaseClient) {
-  return client.from('businesses').select('id, timezone').maybeSingle();
+  return client.from('businesses').select('id, name, slug, timezone').maybeSingle();
 }
 
 function presentBooking(booking: BookingRow, timezone: string, includeContact = false) {
@@ -45,6 +52,7 @@ function presentBooking(booking: BookingRow, timezone: string, includeContact = 
     durationMinutes: booking.duration_minutes_snapshot,
     customerName: booking.customer_name,
     ...(includeContact && booking.customer_email ? { customerEmail: booking.customer_email } : {}),
+    cancellationMessage: booking.cancellation_message ?? null,
     startsAt: booking.starts_at,
     endsAt: booking.ends_at,
     status: booking.status,
@@ -159,15 +167,26 @@ function registerBookingDetailRoute(router: Router) {
   });
 }
 
-function registerBookingStatusRoute(router: Router) {
+function registerBookingStatusRoute(router: Router, emailRuntime: TransactionalEmailRuntime) {
   router.patch('/bookings/:id/status', async (req: Request, res: Response) => {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     if (!uuidPattern.test(id)) return sendError(res, 400, 'INVALID_REQUEST', 'Use a valid booking ID.');
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)
-      || Object.keys(req.body).length !== 1 || !['completed', 'cancelled'].includes(req.body.status)) {
+      || Object.keys(req.body).some((key) => !['status', 'cancellationMessage'].includes(key))
+      || !['completed', 'cancelled'].includes(req.body.status)) {
       return sendError(res, 400, 'INVALID_REQUEST', 'Choose whether to complete or cancel this booking.');
     }
     const target = req.body.status as 'completed' | 'cancelled';
+    if (target === 'completed' && 'cancellationMessage' in req.body) {
+      return sendError(res, 400, 'INVALID_REQUEST', 'A cancellation message can only be sent when cancelling a booking.');
+    }
+    if ('cancellationMessage' in req.body && typeof req.body.cancellationMessage !== 'string') {
+      return sendError(res, 400, 'INVALID_REQUEST', 'Enter a valid cancellation message.');
+    }
+    const cancellationMessage = typeof req.body.cancellationMessage === 'string' ? req.body.cancellationMessage.trim() : '';
+    if (cancellationMessage.length > 1000) {
+      return sendError(res, 422, 'VALIDATION_ERROR', 'Use 1,000 characters or fewer for the cancellation message.');
+    }
     const client = ownerClient(res);
     const { data: business, error: businessError } = await getBusiness(client);
     if (businessError) return sendError(res, 500, 'INTERNAL_ERROR', 'We could not update this booking. Try again.');
@@ -186,11 +205,36 @@ function registerBookingStatusRoute(router: Router) {
       return sendError(res, 422, 'BOOKING_NOT_ENDED', 'A booking can be marked complete after its appointment has ended.');
     }
 
-    const { data: updatedData, error: updateError } = await client.from('bookings').update({ status: target })
+    const bookingUpdate = target === 'cancelled'
+      ? { status: target, cancellation_message: cancellationMessage || null }
+      : { status: target };
+    const { data: updatedData, error: updateError } = await client.from('bookings').update(bookingUpdate)
       .eq('business_id', business.id).eq('id', id).eq('status', 'confirmed')
       .select(bookingFields).maybeSingle();
     if (updateError) return sendError(res, 500, 'INTERNAL_ERROR', 'We could not update this booking. Try again.');
-    if (updatedData) return res.json({ data: presentBooking(updatedData as BookingRow, business.timezone, true) });
+    if (updatedData) {
+      const updated = updatedData as BookingRow;
+      if (target === 'cancelled' && emailRuntime.enabled) {
+        try {
+          if (!emailRuntime.appUrl) throw new Error('APP_URL is not configured.');
+          const email = createOwnerCancellationEmail({
+            businessName: business.name,
+            businessSlug: business.slug,
+            serviceName: updated.service_name_snapshot,
+            customerName: updated.customer_name,
+            customerEmail: updated.customer_email ?? '',
+            startsAt: updated.starts_at,
+            endsAt: updated.ends_at,
+            timezone: business.timezone,
+            cancellationMessage: updated.cancellation_message,
+          }, emailRuntime.appUrl);
+          await sendEmailBestEffort(emailRuntime, 'owner_booking_cancellation', email);
+        } catch {
+          reportEmailFailureSafely(emailRuntime, 'owner_booking_cancellation');
+        }
+      }
+      return res.json({ data: presentBooking(updated, business.timezone, true) });
+    }
 
     const { data: latestData, error: latestError } = await client.from('bookings').select(bookingFields)
       .eq('business_id', business.id).eq('id', id).maybeSingle();
@@ -202,9 +246,9 @@ function registerBookingStatusRoute(router: Router) {
   });
 }
 
-export function registerOwnerBookingRoutes(router: Router) {
+export function registerOwnerBookingRoutes(router: Router, emailRuntime: TransactionalEmailRuntime) {
   registerDashboardRoute(router);
   registerBookingListRoute(router);
   registerBookingDetailRoute(router);
-  registerBookingStatusRoute(router);
+  registerBookingStatusRoute(router, emailRuntime);
 }

@@ -34,9 +34,9 @@ On desktop, use a compact business summary beside a focused booking panel. On mo
 
 1. **Service:** Show name and duration; single-choice controls make the selection obvious. No price or payment UI.
 2. **Date and time:** Use an accessible date picker/calendar limited to the permitted local dates. Show times as large selectable buttons, with the business timezone beside the date/time section. Keep empty dates understandable and easy to change.
-3. **Your details:** Require name and email with visible labels and appropriate autocomplete. Explain that details go to the business; do not promise messages or reminders.
+3. **Your details:** Require name and email with visible labels and appropriate autocomplete. Explain that details go to the business. Mention a booking confirmation email only when transactional email is enabled; when it is disabled, do not promise or imply that an email will be sent. Do not promise reminders.
 4. **Review and confirm:** Show business, service/duration, full date, time, and timezone near **Confirm booking**. Avoid ambiguity from numeric-only dates or unlabeled timezones.
-5. **Confirmation:** Replace the form with a clear **Booking confirmed** result and the appointment summary/reference. Do not add customer cancellation, rescheduling, calendar-sync, or notification controls.
+5. **Confirmation:** Always show a clear on-screen **Booking confirmed** result and the appointment summary/reference. Mention the customer confirmation email only when transactional email is enabled; when disabled, do not promise or imply that an email will follow. Do not add customer cancellation, rescheduling, calendar-sync, or notification controls.
 
 Use progressive disclosure without unnecessary page transitions. Preserve choices when moving back. Keep loading, selection, errors, and confirmation in stable layouts. Never show an optimistic success screen.
 
@@ -57,7 +57,7 @@ Use a compact sidebar on desktop: **Overview**, **Bookings**, **Services**, **Av
 - **Overview:** Three simple counts, next upcoming booking, shareable link/copy action, and setup guidance when needed. No revenue charts or analytics expansion.
 - **Services:** Simple rows/cards with name, duration, and active state; clear add/edit/deactivate actions. Explain that existing bookings remain unchanged.
 - **Availability:** Seven weekday rows with open/closed controls and start/end fields. One explicit save action with visible result. No drag-to-paint calendar or multiple-window editor.
-- **Bookings:** Readable desktop table, mobile cards; show customer, service, date/time/timezone, and status. Details reveal contact data and permitted status actions. Use a confirmation dialog for owner cancellation; explain that it releases the time and does not notify the customer.
+- **Bookings:** Readable desktop table, mobile cards; show customer, service, date/time/timezone, and status. Details reveal contact data and permitted status actions. Use a confirmation dialog for owner cancellation; explain that it releases the time and emails the customer when transactional email is enabled. Let the owner add an optional short message for that email.
 - **Settings:** Business name, timezone, and stable booking URL. Explain the timezone lock when applicable. No teams, locations, billing, or integration placeholders.
 
 Empty states explain the next useful action: add a service, open a weekday, or share the link. Destructive actions use plain labels; avoid icon-only controls for important tasks.

@@ -4,9 +4,9 @@
 
 Opna gives a small business a shareable booking page and a simple owner dashboard. It has two sides, not a marketplace: owners register/login and manage their business; customers find a known business or open its direct link and book without an account.
 
-Owners manage services, weekly availability, bookings, and settings. Customers choose a service, date, and slot, enter their name and email, then receive an on-screen confirmation. Email is contact data only; V1 sends no appointment messages.
+Owners manage services, weekly availability, bookings, and settings. Customers choose a service, date, and slot, enter their name and email, then receive an on-screen confirmation. V1.1 adds transactional emails: a booking confirmation to the customer, a new-booking notice to the owner, and a cancellation email to the customer with an optional owner message and a link to book another time. The Resend implementation sends these after successful database writes and is best-effort. `EMAIL_ENABLED` controls outbound delivery: when `false`, the backend skips email requests and delivery-failure logs while booking/cancellation writes and saved cancellation messages continue normally. The current deployment uses `EMAIL_ENABLED=false`; the Resend implementation is preserved for future activation. No reminders or marketing emails are sent.
 
-**Non-goals:** payments, AI, teams, multiple locations, recurring appointments, rescheduling, customer cancellation, calendar sync, notifications, WhatsApp automation, complex scheduling, customer accounts, and marketplace discovery. No pricing/revenue features or additional customer fields are required.
+**Non-goals:** payments, AI, teams, multiple locations, recurring appointments, rescheduling, customer cancellation, calendar sync, reminders, marketing, WhatsApp automation, complex scheduling, customer accounts, and marketplace discovery. No pricing/revenue features or additional customer fields are required.
 
 **Stack:** React + Vite + TypeScript + Tailwind; Node.js + Express + TypeScript; Supabase Postgres + Supabase Auth; free-tier deployment.
 
@@ -49,7 +49,7 @@ UUID primary keys and UTC `created_at`/`updated_at` where applicable. Supabase A
 | `businesses` | `id`, `owner_id` → `auth.users` **unique**, `name`, `slug` **unique**, `timezone`, timestamps. Slug is lowercase ASCII letters/numbers with internal hyphens; reserve it permanently for the business. |
 | `services` | `id`, `business_id`, `name`, `duration_minutes`, `is_active`, timestamps. Check duration bounds/divisibility. Deactivate rather than hard-delete referenced services. |
 | `weekly_availability` | `business_id`, `weekday` (0=Sunday through 6=Saturday), `start_local`, `end_local`. Composite primary key `(business_id, weekday)`; missing row means closed. Checks enforce weekday, order, and quarter-hour times. |
-| `bookings` | `id`, `business_id`, `service_id`, `service_name_snapshot`, `duration_minutes_snapshot`, `customer_name`, `customer_email`, `starts_at`, `ends_at`, `status`, timestamps. Checks enforce valid status, positive interval, and snapshot duration. |
+| `bookings` | `id`, `business_id`, `service_id`, `service_name_snapshot`, `duration_minutes_snapshot`, `customer_name`, `customer_email`, optional `cancellation_message` (maximum 1,000 characters), `starts_at`, `ends_at`, `status`, timestamps. Checks enforce valid status, positive interval, and snapshot duration. |
 
 Enforce that a booking's service belongs to its business with a composite foreign key `(service_id, business_id)` referencing a unique `(id, business_id)` service key. Keep service name/duration snapshots so editing a service does not rewrite appointment history. Do not implement business/account deletion in V1.
 
@@ -102,7 +102,7 @@ All paths below are under `/api`. Owner routes require a Supabase bearer token v
 | `GET /owner/availability` | → Weekly windows. |
 | `PUT /owner/availability` | `{windows: [{weekday, startLocal, endLocal}]}` → Replace the saved weekly windows; omitted weekdays are closed. |
 | `GET /owner/bookings?cursor=` | → Paginated own bookings, newest appointment first; include fields needed for list/detail. |
-| `PATCH /owner/bookings/:id/status` | `{status: "completed" | "cancelled"}` → Updated booking. |
+| `PATCH /owner/bookings/:id/status` | `{status: "completed" | "cancelled", cancellationMessage?: string}` → Updated booking; message is accepted only for cancellation. |
 | `GET /owner/dashboard` | → Upcoming confirmed count (`startsAt > now`), all-time completed/cancelled counts, next upcoming confirmed booking. |
 
 Use `400` for malformed input, `401` for missing/invalid owner sessions, `404` for missing resources or IDs owned by someone else, `409` for conflicts, and `422` for valid-shaped input violating business rules. Use `429` when the basic public rate limit is exceeded and a generic `500` for unexpected errors.
@@ -114,7 +114,8 @@ Apply server-side input validation, trimmed names, normalized emails, request-bo
 - Every data screen has loading, empty, success, and recoverable error states. Keep entered form values on errors and show field errors beside fields.
 - Unknown slug gets a friendly not-found page. Unconfigured business shows an unavailable state; closed/full dates show “No times available” with an easy date change.
 - Changing service clears the selected time and reloads slots; changing date clears the time. Ignore outdated requests so late responses cannot replace the current selection.
-- During submit disable duplicate actions and communicate progress. Confirm only after a successful server response; confirmation shows business, service, date/time, timezone, reference, and confirmed status. It offers no cancellation/rescheduling action.
+- During submit disable duplicate actions and communicate progress. Confirm only after a successful server response; confirmation shows business, service, date/time, timezone, reference, and confirmed status. Send the customer a confirmation email and the owner a new-booking email after the booking insert succeeds. These sends are best-effort and do not affect booking success.
+- On owner cancellation, save the optional cancellation message with the status update, then send the customer a cancellation email with business/service/time details and a link to book another time. Repeated cancellation actions do not send another email.
 - On `SLOT_UNAVAILABLE`, retain service/date/contact details, clear the time, refresh slots, and ask for another time. On a horizon/past-slot error, refresh date/slot options.
 - If booking submission fails because of a network error, keep the entered details and offer retry. V1 does not implement idempotent lost-response recovery; the database overlap constraint still prevents a second appointment occupying the same time.
 - Expired owner session returns to login with a safe local return path. Status actions update only after server success; counts/list refresh together.

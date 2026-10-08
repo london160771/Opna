@@ -33,6 +33,7 @@ export type OwnerBooking = {
   durationMinutes: number;
   customerName: string;
   customerEmail?: string;
+  cancellationMessage?: string | null;
   startsAt: string;
   endsAt: string;
   status: BookingStatus;
@@ -139,8 +140,8 @@ export function getOwnerBooking(accessToken: string, id: string) {
   return ownerRequest<OwnerBooking>(accessToken, `/bookings/${encodeURIComponent(id)}`);
 }
 
-export function updateOwnerBookingStatus(accessToken: string, id: string, status: 'completed' | 'cancelled') {
+export function updateOwnerBookingStatus(accessToken: string, id: string, status: 'completed' | 'cancelled', cancellationMessage?: string) {
   return ownerRequest<OwnerBooking>(accessToken, `/bookings/${encodeURIComponent(id)}/status`, {
-    method: 'PATCH', body: JSON.stringify({ status }),
+    method: 'PATCH', body: JSON.stringify({ status, ...(cancellationMessage === undefined ? {} : { cancellationMessage }) }),
   });
 }

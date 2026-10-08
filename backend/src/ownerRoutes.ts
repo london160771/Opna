@@ -2,6 +2,7 @@ import type { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OwnerLocals } from './auth/requireOwner.js';
 import { registerOwnerBookingRoutes } from './ownerBookingRoutes.js';
+import type { TransactionalEmailRuntime } from './transactionalEmail.js';
 
 type Fields = Record<string, string>;
 type Business = { id: string; name: string; slug: string; timezone: string; hasBookings: boolean };
@@ -146,7 +147,7 @@ function validateWindows(value: unknown): { windows?: AvailabilityWindow[]; erro
   return Object.keys(fields).length ? { error: fields } : { windows };
 }
 
-export function registerOwnerRoutes(router: Router) {
+export function registerOwnerRoutes(router: Router, emailRuntime: TransactionalEmailRuntime) {
   router.get('/business', async (_req: Request, res: Response) => {
     const supabase = ownerClient(res);
     const { data, error } = await ownBusiness(supabase);
@@ -326,5 +327,5 @@ export function registerOwnerRoutes(router: Router) {
     return res.json({ data: { windows } });
   });
 
-  registerOwnerBookingRoutes(router);
+  registerOwnerBookingRoutes(router, emailRuntime);
 }
