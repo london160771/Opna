@@ -2,9 +2,9 @@
 
 Opna is a two-sided booking MVP. Owners authenticate and manage one business; customers book through a known business link without creating an account.
 
-## Phase 2 status
+## Phase 4 status
 
-This repository contains the frontend/backend foundation, Supabase Auth, protected owner routes, business setup and profile settings, a permanent booking slug, service management, weekly availability, public business lookup and booking, business-timezone slot generation, server-side booking revalidation, the database overlap constraint, and Phase 0/1/2 tests. Booking management and dashboard features are not part of Phase 2.
+The V1 booking MVP includes owner authentication and setup, services and weekly availability, anonymous public booking, the timezone-aware booking engine, owner dashboard and booking management, responsive states, and a Netlify static-plus-functions deployment configuration. Supabase stores all product data.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ This repository contains the frontend/backend foundation, Supabase Auth, protect
 4. Run `npm run db:reset` to apply the migrations to the local database.
 5. Run `npm run dev` to start the API at `http://localhost:3001` and the frontend at `http://localhost:5173`.
 
-The frontend loads `frontend/.env`; the backend loads `backend/.env` and falls back to the root `.env` for compatibility. For a hosted Supabase project, configure its Site URL and allowed redirect URLs for the deployed frontend, then apply migrations with the Supabase CLI. Set the backend and frontend environment variables in their respective hosting environments. `SUPABASE_SECRET_KEY` is required by public business lookup and booking routes. Keep it on the backend and never put it in a `VITE_` variable.
+The frontend loads `frontend/.env`; the backend loads `backend/.env` and falls back to the root `.env` for compatibility. Before deployment, authenticate the Supabase CLI with `npx supabase login`, then apply the migrations to the hosted project from the repository root with `npx supabase link --project-ref <project-ref>` followed by `npx supabase db push`. Configure the Supabase Auth Site URL and allowed redirect URLs for the deployed frontend. Set the backend and frontend environment variables in the Netlify site environment. `SUPABASE_SECRET_KEY` is required by public business lookup, booking, and keepalive routes. Keep it server-side and never put it in a `VITE_` variable.
 
 ## Environment variables
 
@@ -31,6 +31,7 @@ The frontend loads `frontend/.env`; the backend loads `backend/.env` and falls b
 | `SUPABASE_SECRET_KEY` | Backend only | Secret key for approved public business reads and booking writes; never expose it to the frontend |
 | `PORT` | Backend | API port (defaults to `3001`) |
 | `CORS_ORIGINS` | Backend | Comma-separated frontend origins allowed to call the API |
+| `KEEPALIVE_TOKEN` | Backend only | Bearer token required by the Supabase activity endpoint |
 | `VITE_SUPABASE_URL` | Frontend | Supabase Auth URL |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Frontend | Public Supabase Auth key |
 | `VITE_API_URL` | Frontend | API base URL (defaults to `/api`) |
@@ -51,7 +52,8 @@ The frontend loads `frontend/.env`; the backend loads `backend/.env` and falls b
 - `/register` and `/login` — Supabase Auth flows
 - `/app/*` — session-protected owner routes
 - `/app/setup` — first business creation with a permanent booking slug
-- `/app` — setup progress for services and availability
+- `/app` — owner dashboard, booking counts, next booking, and share link
+- `/app/bookings` and `/app/bookings/:id` — responsive booking list and details/status actions
 - `/app/services` — create, edit, activate, and deactivate services
 - `/app/availability` — replace the seven-day weekly schedule
 - `/app/settings` — business name, timezone, and stable booking link
@@ -61,6 +63,7 @@ The frontend loads `frontend/.env`; the backend loads `backend/.env` and falls b
 - `GET /api/public/businesses/:slug/slots` — available slots in the business timezone
 - `POST /api/public/businesses/:slug/bookings` — validated anonymous booking creation
 - `GET /api/health` — API health check
+- `GET /api/keepalive` — authenticated, bounded Supabase activity check for GitHub Actions
 - `/api/owner/business`, `/api/owner/services`, `/api/owner/availability` — authenticated, RLS-scoped owner configuration API
 
 Owner API requests verify the Supabase access token on the server and query Postgres using that same token, so Postgres RLS applies to owner reads and writes. Public API routes use explicit response projections and a backend-only secret key to return approved public fields and create validated bookings. The database denies the `anon` role direct access to owner tables and prevents overlapping active booking intervals with an exclusion constraint.
@@ -68,3 +71,16 @@ Owner API requests verify the Supabase access token on the server and query Post
 ## Verification limits
 
 The unit tests run without Supabase credentials. Schema, RLS, stable-slug/timezone protections, atomic weekly availability, and booking overlap enforcement are defined in migrations, with pgTAP checks under `supabase/tests/`. Run `npm run db:reset` followed by `npm run db:test` against a local Supabase stack to verify the database constraints and policies. The opt-in `backend/test/publicBooking.integration.test.ts` submits competing inserts to verify the overlap constraint and API conflict response; it requires `RUN_LOCAL_DB_INTEGRATION=true`, a configured backend secret key, and a Supabase URL on loopback. It refuses hosted Supabase URLs. Public route smoke tests also require a configured backend secret key.
+
+## Netlify deployment
+
+The root `netlify.toml` builds the static Vite frontend and packages the same Express API as a Netlify Function. It rewrites `/api/*` to the function and all other unknown paths to `index.html`, so direct links such as `/book/:slug` and `/app/bookings/:id` survive refresh. Deploy the repository root as one Netlify site; the Free plan currently has a hard monthly usage limit and pauses sites at that limit, with no automatic charge. Check the live plan limits before launch.
+
+Configure these site environment variables before the production build:
+
+- `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` for browser-side Supabase Auth.
+- `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_SECRET_KEY` for server-side API calls.
+- `CORS_ORIGINS` with the exact deployed site origin (for example, `https://your-site.netlify.app`).
+- `KEEPALIVE_TOKEN` with a long random value kept in the site environment only.
+
+After deploy, set the Supabase Auth Site URL and allowed redirect URLs to the deployed origin. Add GitHub repository secrets `KEEPALIVE_URL` (the deployed `/api/keepalive` URL) and `KEEPALIVE_TOKEN` (the same value as the Netlify backend variable). `.github/workflows/supabase-keepalive.yml` runs a database query twice daily and can also be started manually. Its secrets and workflow take effect after the workflow is pushed to the default branch. The keepalive is best-effort: GitHub may delay, drop, or disable scheduled runs, and this check cannot guarantee exemption from Supabase inactivity pausing. Monitor Supabase pause warnings and project status. The query checks only one business ID and never returns database rows.

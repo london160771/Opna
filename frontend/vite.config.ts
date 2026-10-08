@@ -14,6 +14,18 @@ export default defineConfig({
     noDiscovery: true,
     include: ['react', 'react-dom/client', 'react-router-dom', '@supabase/supabase-js'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replaceAll('\\', '/');
+          if (normalizedId.includes('/node_modules/@supabase/')) return 'supabase';
+          if (normalizedId.includes('/node_modules/react')) return 'react';
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     host: '127.0.0.1',
     fs: { allow: [projectRoot] },

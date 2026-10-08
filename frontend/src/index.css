@@ -21,7 +21,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -31,8 +33,25 @@ a {
 }
 
 :focus-visible {
-  outline: 3px solid #60a5fa;
+  outline: 3px solid #1d4ed8;
   outline-offset: 2px;
+}
+
+input,
+select,
+textarea {
+  accent-color: #1d4ed8;
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: #b91c1c !important;
+}
+
+::selection {
+  color: #0f172a;
+  background: #bfdbfe;
 }
 
 @media (prefers-reduced-motion: reduce) {

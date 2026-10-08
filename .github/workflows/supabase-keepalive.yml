@@ -1,0 +1,32 @@
+name: Supabase keepalive
+
+on:
+  schedule:
+    - cron: '17 1,13 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Run authenticated database activity check
+        env:
+          KEEPALIVE_URL: ${{ secrets.KEEPALIVE_URL }}
+          KEEPALIVE_TOKEN: ${{ secrets.KEEPALIVE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEEPALIVE_URL" || -z "$KEEPALIVE_TOKEN" ]]; then
+            echo "Set the KEEPALIVE_URL and KEEPALIVE_TOKEN repository secrets before enabling this workflow."
+            exit 1
+          fi
+          if [[ "$KEEPALIVE_URL" != https://* ]]; then
+            echo "KEEPALIVE_URL must use HTTPS."
+            exit 1
+          fi
+          curl --fail --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer $KEEPALIVE_TOKEN" \
+            "$KEEPALIVE_URL"

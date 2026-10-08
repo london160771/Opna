@@ -9,6 +9,7 @@ const config: AppConfig = {
   supabasePublishableKey: 'publishable-test-key',
   port: 3001,
   corsOrigins: ['http://localhost:5173'],
+  keepaliveToken: 'test-keepalive-token',
 };
 
 const ownerBusiness = { id: 'business-a', name: 'A Studio', slug: 'a-studio', timezone: 'Europe/London' };
@@ -49,6 +50,38 @@ describe('Phase 0 API', () => {
   it('returns the health envelope', async () => {
     const app = createApp({ config, createUserClient: vi.fn() });
     await request(app).get('/api/health').expect(200).expect({ data: { status: 'ok' } });
+  });
+
+  it('protects the keepalive endpoint with its bearer token', async () => {
+    const createPublicClient = vi.fn();
+    const app = createApp({ config, createUserClient: vi.fn(), createPublicClient });
+    await request(app).get('/api/keepalive').expect(401)
+      .expect({ error: { code: 'UNAUTHENTICATED', message: 'Provide the keepalive token.' } });
+    expect(createPublicClient).not.toHaveBeenCalled();
+  });
+
+  it('checks Supabase with a bounded query for an authorized keepalive', async () => {
+    const query = { select: vi.fn(() => query), limit: vi.fn().mockResolvedValue({ data: [], error: null }) };
+    const supabase = { from: vi.fn(() => query) } as unknown as SupabaseClient;
+    const createPublicClient = vi.fn(() => supabase);
+    const app = createApp({ config, createUserClient: vi.fn(), createPublicClient });
+
+    await request(app).get('/api/keepalive').set('Authorization', 'Bearer test-keepalive-token')
+      .expect(200).expect({ data: { status: 'ok' } });
+
+    expect(supabase.from).toHaveBeenCalledWith('businesses');
+    expect(query.select).toHaveBeenCalledWith('id');
+    expect(query.limit).toHaveBeenCalledWith(1);
+  });
+
+  it('returns a generic unavailable response when the keepalive database check fails', async () => {
+    const query = { select: vi.fn(() => query), limit: vi.fn().mockResolvedValue({ data: null, error: new Error('private database detail') }) };
+    const supabase = { from: vi.fn(() => query) } as unknown as SupabaseClient;
+    const app = createApp({ config, createUserClient: vi.fn(), createPublicClient: vi.fn(() => supabase) });
+
+    await request(app).get('/api/keepalive').set('Authorization', 'Bearer test-keepalive-token')
+      .expect(503)
+      .expect({ error: { code: 'KEEPALIVE_UNAVAILABLE', message: 'Database activity could not be verified.' } });
   });
 
   it('returns 400 for malformed JSON request bodies', async () => {
